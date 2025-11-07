@@ -13,6 +13,7 @@
 
 - [Overview](#overview)
 - [Architecture](#architecture)
+- [Development Pipeline](#development-pipeline)
 - [Training Pipeline Flowcharts](#training-pipeline-flowcharts)
 - [Quick Start](#quick-start)
 - [Model Sizes & Requirements](#model-sizes--requirements)
@@ -125,6 +126,582 @@ graph LR
     style C fill:#fff3e0
     style F fill:#fce4ec
     style H fill:#f1f8e9
+```
+
+---
+
+## Development Pipeline
+
+### Overview
+
+The Ava development pipeline encompasses the complete workflow from local development through testing, integration, and production deployment. This section documents best practices, tools, and automation for maintaining code quality and enabling rapid iteration.
+
+### Development Pipeline Architecture
+
+```mermaid
+graph TD
+    A["🛠️ Code Changes"] --> B["✓ Type Check<br/>Lint & Format"]
+    B --> C["✓ Unit Tests"]
+    C --> D["✓ Config Valid<br/>Data Check"]
+    D --> E{Quality<br/>Gate}
+    E -->|❌ Fail| F["🔄 Debug & Fix"]
+    F --> A
+    E -->|✅ Pass| G["🏷️ Release Tag"]
+    G --> H["📦 Build & Deploy"]
+    H --> I["📊 Monitor"]
+    
+    style A fill:#e3f2fd
+    style B fill:#e1f5fe
+    style C fill:#e1f5fe
+    style D fill:#e1f5fe
+    style E fill:#ff9800,color:#fff,stroke:#f57c00,stroke-width:3px
+    style F fill:#ffccbc
+    style G fill:#4caf50,color:#fff
+    style H fill:#66bb6a,color:#fff
+    style I fill:#2196f3,color:#fff
+```
+
+### Development Workflow Steps
+
+#### 1. Local Development Environment Setup
+
+```bash
+# Clone and install
+git clone https://github.com/yourusername/ava-llm.git
+cd ava-llm
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # On macOS/Linux
+# or
+python -m venv venv
+venv\Scripts\activate  # On Windows
+
+# Install development dependencies
+pip install -r requirements.txt
+pip install -r requirements-dev.txt  # Optional: dev tools
+
+# Install pre-commit hooks
+pre-commit install
+```
+
+#### 2. Code Development & Testing
+
+```bash
+# Make code changes in your feature branch
+git checkout -b feature/your-feature
+
+# Type checking with Pyright
+pyright code/src/Ava/
+
+# Format code with Black
+black code/src/Ava/
+black code/scripts/
+
+# Sort imports with isort
+isort code/src/Ava/
+isort code/scripts/
+
+# Lint with Ruff
+ruff check code/src/Ava/ --fix
+ruff check code/scripts/ --fix
+
+# Run unit tests
+pytest tests/ -v
+pytest tests/ --cov=code/src/Ava/  # With coverage
+```
+
+#### 3. Pre-Flight Validation
+
+Before training, run validation checks:
+
+```bash
+# Configuration validation
+python -c "
+from code.src.Ava.config import ConfigValidator
+validator = ConfigValidator()
+validator.validate_config('code/configs/gpu/small.yaml')
+validator.generate_report()
+"
+
+# Data pipeline validation
+python code/scripts/2_data_prep/process_all_data.py --validate-only
+
+# Feature compatibility check
+python -c "
+from code.src.Ava.config import CompatibilityMatrix
+matrix = CompatibilityMatrix()
+matrix.check_compatibility('code/configs/gpu/small.yaml')
+matrix.print_report()
+"
+```
+
+#### 4. Quick Integration Test (Optional)
+
+For rapid iteration, run a quick training smoke test:
+
+```bash
+# Quick test: 100 steps with tiny model
+python code/scripts/5_training/train.py \
+  --config code/configs/gpu/tiny.yaml \
+  --max-steps 100 \
+  --eval-steps 50 \
+  --save-steps 100 \
+  --experiment-name test_ci
+```
+
+#### 5. Documentation & Commit
+
+```bash
+# Update documentation if needed
+# - Update code/docs/ if feature adds new capability
+# - Update CHANGELOG.md with changes
+# - Update README.md for user-facing changes
+
+# Stage and commit
+git add .
+git commit -m "feat: add amazing feature"
+
+# Follow conventional commits:
+# feat: new feature
+# fix: bug fix
+# docs: documentation
+# test: tests
+# refactor: code refactoring
+# perf: performance improvement
+```
+
+#### 6. Create Pull Request
+
+```bash
+# Push to remote
+git push origin feature/your-feature
+
+# Create PR on GitHub with:
+# - Clear description of changes
+# - Link to related issues
+# - Test results and screenshots (if UI changes)
+# - Reviewer checklist completion
+```
+
+#### 7. Code Review & Merge
+
+```bash
+# Address review feedback
+git add .
+git commit -m "refactor: address review feedback"
+git push origin feature/your-feature
+
+# After approval, merge to main
+git checkout main
+git pull origin main
+git merge feature/your-feature
+git push origin main
+```
+
+### CI/CD Pipeline Configuration
+
+#### GitHub Actions Workflow
+
+Create `.github/workflows/ci.yml`:
+
+```yaml
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      
+      - name: Type checking (Pyright)
+        run: pyright code/src/Ava/
+      
+      - name: Linting (Ruff)
+        run: |
+          ruff check code/src/Ava/
+          ruff check code/scripts/
+      
+      - name: Format check (Black)
+        run: black --check code/src/Ava/
+      
+      - name: Import sorting (isort)
+        run: isort --check-only code/src/Ava/
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+      
+      - name: Run tests
+        run: pytest tests/ -v --cov=code/src/Ava/
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Config validation
+        run: |
+          python -c "
+          from code.src.Ava.config import ConfigValidator
+          validator = ConfigValidator()
+          for config in ['tiny', 'small', 'base']:
+              validator.validate_config(f'code/configs/gpu/{config}.yaml')
+          "
+      
+      - name: Data pipeline test
+        run: python code/scripts/2_data_prep/process_all_data.py --validate-only
+      
+      - name: Quick training smoke test
+        run: |
+          python code/scripts/5_training/train.py \
+            --config code/configs/gpu/tiny.yaml \
+            --max-steps 10 \
+            --experiment-name ci_test
+```
+
+### Development Best Practices
+
+#### Code Quality Standards
+
+**Type Hints:**
+```python
+# Good: Clear type hints
+def process_batch(
+    batch: Dict[str, torch.Tensor],
+    model: nn.Module,
+    loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
+) -> Dict[str, float]:
+    """Process a batch and return metrics."""
+    outputs = model(batch)
+    loss = loss_fn(outputs, batch["labels"])
+    return {"loss": loss.item()}
+
+# Avoid: No type hints
+def process_batch(batch, model, loss_fn):
+    outputs = model(batch)
+    loss = loss_fn(outputs, batch["labels"])
+    return {"loss": loss.item()}
+```
+
+**Docstrings:**
+```python
+def adaptive_lr_update(
+    current_loss: float,
+    best_loss: float,
+    patience: int,
+    learning_rate: float
+) -> Tuple[float, int, bool]:
+    """
+    Update learning rate based on loss plateau.
+    
+    Args:
+        current_loss: Current validation loss
+        best_loss: Best validation loss seen
+        patience: Steps without improvement
+        learning_rate: Current learning rate
+    
+    Returns:
+        Tuple of:
+        - new_learning_rate: Updated learning rate
+        - new_patience: Updated patience counter
+        - should_reduce: Whether LR was reduced
+    
+    Example:
+        >>> new_lr, new_pat, reduced = adaptive_lr_update(
+        ...     current_loss=5.2, best_loss=5.0, patience=100, learning_rate=0.0001
+        ... )
+    """
+    improvement = best_loss - current_loss
+    if improvement > 0.005:
+        return learning_rate, 0, False
+    else:
+        return learning_rate * 0.7, patience + 1, True
+```
+
+**Error Handling:**
+```python
+# Good: Specific exceptions with context
+try:
+    data = load_dataset(path)
+except FileNotFoundError as e:
+    logger.error(f"Data file not found at {path}: {e}")
+    raise
+except ValueError as e:
+    logger.error(f"Invalid data format: {e}")
+    # Fallback or recovery
+    data = load_default_data()
+
+# Avoid: Bare except
+try:
+    data = load_dataset(path)
+except:
+    pass
+```
+
+#### Testing Best Practices
+
+**Unit Test Structure:**
+```python
+# tests/test_adaptive_lr.py
+import pytest
+from code.src.Ava.training.adaptive_lr import AdaptiveLRManager
+
+class TestAdaptiveLRManager:
+    """Test suite for AdaptiveLRManager."""
+    
+    @pytest.fixture
+    def manager(self):
+        """Create manager instance."""
+        return AdaptiveLRManager(
+            initial_lr=0.0001,
+            min_lr=0.00003,
+            max_lr=0.0002
+        )
+    
+    def test_reduce_lr_on_plateau(self, manager):
+        """Test LR reduction on plateau."""
+        original_lr = manager.current_lr
+        manager.update(loss=5.0, is_improvement=False, plateau_steps=100)
+        assert manager.current_lr < original_lr
+    
+    def test_increase_lr_on_recovery(self, manager):
+        """Test LR increase on loss improvement."""
+        manager.current_lr = 0.00005
+        manager.update(loss=4.8, is_improvement=True, plateau_steps=0)
+        assert manager.current_lr > 0.00005
+    
+    def test_bounds_enforcement(self, manager):
+        """Test LR stays within bounds."""
+        manager.update(loss=3.0, is_improvement=True, plateau_steps=0)
+        assert manager.current_lr <= manager.max_lr
+        
+        manager.update(loss=10.0, is_improvement=False, plateau_steps=2000)
+        assert manager.current_lr >= manager.min_lr
+```
+
+**Mocking External Dependencies:**
+```python
+from unittest.mock import Mock, patch
+
+def test_training_with_mock_dataloader():
+    """Test training with mocked dataloader."""
+    mock_dataloader = Mock()
+    mock_dataloader.__iter__.return_value = [
+        {"input_ids": torch.randn(4, 256), "labels": torch.randn(4, 256)}
+        for _ in range(10)
+    ]
+    
+    trainer = EnhancedTrainer(model=model, dataloader=mock_dataloader)
+    trainer.train_step()
+    
+    assert mock_dataloader.__iter__.called
+```
+
+### Release Management
+
+#### Version Numbering (Semantic Versioning)
+
+```
+MAJOR.MINOR.PATCH[-prerelease][+metadata]
+
+Examples:
+- 2.3.0      # Release
+- 2.4.0-rc1  # Release candidate
+- 2.4.0-dev  # Development
+```
+
+**When to increment:**
+- `MAJOR`: Breaking changes (incompatible API changes)
+- `MINOR`: New features (backward compatible)
+- `PATCH`: Bug fixes (backward compatible)
+
+#### Release Checklist
+
+```markdown
+# Release v2.4.0 Checklist
+
+## Pre-Release
+- [ ] All tests passing on main branch
+- [ ] Code reviewed and approved
+- [ ] Documentation updated
+- [ ] CHANGELOG.md updated with all changes
+- [ ] Dependencies updated and tested
+- [ ] Performance benchmarks run and documented
+
+## Release
+- [ ] Create git tag: `git tag -a v2.4.0 -m "Release v2.4.0"`
+- [ ] Push tag: `git push origin v2.4.0`
+- [ ] Create GitHub Release with changelog
+- [ ] Build release artifacts
+- [ ] Upload to PyPI (if applicable)
+
+## Post-Release
+- [ ] Update version in code/pyproject.toml
+- [ ] Create v2.5.0-dev branch
+- [ ] Announce release in discussions
+- [ ] Monitor for issues
+```
+
+#### CHANGELOG Format
+
+```markdown
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [2.4.0] - 2025-02-15
+
+### Added
+- Adaptive multi-token prediction for faster inference
+- RAG integration with vector database support
+- Quantization with NVFP4 format
+- Gradient surgery (PCGrad, GradNorm) support
+- Performance dashboard for real-time monitoring
+
+### Changed
+- Improved memory efficiency in MoE routing (8% reduction)
+- Enhanced gradient health monitoring with adaptive thresholds
+- Simplified configuration system with better validation
+
+### Fixed
+- Fixed OOM on distributed training with ZeRO-3
+- Corrected learning rate scheduler edge cases
+- Resolved data pipeline corruption handling
+
+### Deprecated
+- `legacy_router.py` - Use new DeepSeek router instead
+
+## [2.3.0] - 2025-01-20
+...
+```
+
+### Monitoring & Observability
+
+#### Logging Strategy
+
+```python
+from code.src.Ava.logging import get_logger
+
+logger = get_logger(__name__, level="INFO")
+
+# Log levels:
+logger.debug("Detailed diagnostic information")      # Development only
+logger.info("General informational messages")        # Training progress
+logger.warning("Warning messages for issues")        # Memory warnings
+logger.error("Error messages for failures")          # Training failures
+logger.critical("Critical errors requiring action")  # System failures
+```
+
+#### Metrics to Track
+
+```python
+# Training metrics
+metrics = {
+    "loss/train": float,           # Training loss
+    "loss/validation": float,      # Validation loss
+    "learning_rate": float,        # Current LR
+    "gradient_norm": float,        # Global gradient norm
+    "expert_load": Dict[int, float], # Expert utilization
+    "throughput_tokens_per_sec": float,
+    "memory_usage_gb": float,
+    "steps_per_second": float
+}
+
+# Quality metrics
+quality_metrics = {
+    "perplexity": float,           # Lower is better
+    "distinct_2": float,           # 0-1, higher is better (diversity)
+    "coherence_score": float,      # 0-100, higher is better
+    "repetition_rate": float,      # 0-1, lower is better
+    "entropy": float               # Information content
+}
+```
+
+#### Weights & Biases Integration
+
+```python
+import wandb
+
+# Initialize W&B
+wandb.init(
+    project="ava-llm",
+    name="experiment_name",
+    config=config_dict,
+    tags=["training", "small-model"],
+    notes="Experiment description"
+)
+
+# Log metrics during training
+wandb.log({
+    "loss/train": train_loss,
+    "loss/validation": val_loss,
+    "learning_rate": current_lr,
+    "gradient_norm": grad_norm,
+    "step": step
+})
+
+# Log evaluation results
+wandb.log({
+    "eval/perplexity": perplexity,
+    "eval/distinct_2": distinct_2,
+    "eval/coherence": coherence_score
+})
+
+# Save artifacts
+wandb.save("checkpoints/model.pt")
+wandb.save("logs/training.log")
+
+# Finish run
+wandb.finish()
 ```
 
 ---
